@@ -1,9 +1,11 @@
-Eastleigh Balance Dashboard V3
+Eastleigh Priority 1 Dashboard
 
-Files:
-- app.py
-- Eastleigh_Masterlist.xlsx
-- requirements.txt
+Upgrades included:
+- Balance % shown on parent nodes
+- Red/amber/green status colouring
+- Thicker lines for larger kWh flow
+- Contribution dashboard with pie and bar views
+- Inospace Eastleigh Exchange heading and address
 
 Local:
 pip install -r requirements.txt
