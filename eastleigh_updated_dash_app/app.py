@@ -1,6 +1,6 @@
 
 from pathlib import Path
-from collections import defaultdict, deque
+from collections import defaultdict
 
 import pandas as pd
 import dash
@@ -12,9 +12,8 @@ import plotly.express as px
 EXCEL_FILE = Path(__file__).with_name("Eastleigh_Masterlist.xlsx")
 SHEET_NAME = 0
 
-BALANCE_OK_PERCENT = 5       # 0% to 5% = balanced / green
-BALANCE_WARN_PERCENT = 10    # 5% to 10% = warning / amber
-# Above 10% = mismatch / red
+BALANCE_OK_PERCENT = 5
+BALANCE_WARN_PERCENT = 10
 
 
 def clean_text(value):
@@ -62,15 +61,7 @@ def load_data():
     df.columns = [str(c).strip() for c in df.columns]
     df = df.dropna(how="all")
 
-    required = [
-        "Parent",
-        "Child",
-        "Parent Meter Serial Nr",
-        "Child Meter Serial Nr",
-        "Level",
-        "kWh",
-    ]
-
+    required = ["Parent", "Child", "Parent Meter Serial Nr", "Child Meter Serial Nr", "Level", "kWh"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns in Excel: {missing}")
@@ -103,7 +94,6 @@ def load_data():
                 "kind": "virtual" if parent_meter.lower() == "virtual meter" else "meter",
             }
 
-        # If no child, this row is the top/root value
         if not child_name:
             nodes[parent_id]["kwh"] = kwh
             nodes[parent_id]["kind"] = "root"
@@ -150,7 +140,6 @@ def calc_balance(nid, nodes, children_map):
 
 def find_root(nodes, parent_map):
     roots = [nid for nid in nodes if nid not in parent_map]
-    # Prefer HV Supply if found
     for root in roots:
         if "hv" in nodes[root]["name"].lower():
             return root
@@ -159,23 +148,17 @@ def find_root(nodes, parent_map):
 
 def order_children(children, nodes):
     preferred = {
-        "tx2": 0,
-        "tx1": 1,
-        "lv 2": 0,
-        "unit 18": 1,
-        "panel a": 0,
-        "panel b": 1,
+        "tx2": 0, "tx1": 1,
+        "lv 2": 0, "lv2": 0, "unit 18": 1,
+        "panel a": 0, "panel b": 1,
         "common area": 50,
-        "unit 5&6": 50,
-        "unit 5 & 6": 50,
+        "unit 5&6": 50, "unit 5 & 6": 50,
     }
     return sorted(children, key=lambda c: (preferred.get(nodes[c]["name"].lower(), 20), nodes[c]["name"]))
 
 
 def calculate_positions(nodes, children_map, parent_map):
     root = find_root(nodes, parent_map)
-
-    # Use tree layout with fixed coordinates so it resembles a single line diagram.
     x_spacing = 175
     y_spacing = 165
     positions = {}
@@ -184,19 +167,16 @@ def calculate_positions(nodes, children_map, parent_map):
     def dfs(nid, depth=0):
         nonlocal leaf_counter
         children = order_children(children_map.get(nid, []), nodes)
-
         if not children:
             x = leaf_counter * x_spacing + 70
             leaf_counter += 1
         else:
             child_xs = [dfs(child, depth + 1) for child in children]
             x = sum(child_xs) / len(child_xs)
-
         positions[nid] = {"x": x, "y": depth * y_spacing + 35}
         return x
 
     dfs(root)
-
     return positions
 
 
@@ -219,7 +199,6 @@ def class_for_node(nid, n, children_map, balance_status):
         return f"{base} check"
     if balance_status == "BALANCED":
         return f"{base} balanced"
-
     return base
 
 
@@ -245,11 +224,7 @@ for nid, n in nodes.items():
             f"Diff: {diff_pct:+.1f}%"
         )
     else:
-        label = (
-            f"{n['name']}\n"
-            f"Meter: {meter_text}\n"
-            f"{n['kwh']:,.2f} kWh"
-        )
+        label = f"{n['name']}\nMeter: {meter_text}\n{n['kwh']:,.2f} kWh"
 
     cy_elements.append({
         "data": {
@@ -284,10 +259,8 @@ for source, target in edges:
 
 parent_options = [
     {"label": f"{nodes[nid]['name']} ({nodes[nid]['meter']})", "value": nid}
-    for nid in nodes
-    if nid in children_map
+    for nid in nodes if nid in children_map
 ]
-
 default_parent = parent_options[0]["value"] if parent_options else None
 
 
@@ -295,14 +268,9 @@ def make_pie(parent_id):
     if not parent_id or parent_id not in children_map:
         return px.pie(title="No parent selected")
 
-    child_ids = children_map[parent_id]
     pie_df = pd.DataFrame([
-        {
-            "Meter": nodes[c]["name"],
-            "Meter No": nodes[c]["meter"],
-            "kWh": nodes[c]["kwh"],
-        }
-        for c in child_ids
+        {"Meter": nodes[c]["name"], "Meter No": nodes[c]["meter"], "kWh": nodes[c]["kwh"]}
+        for c in children_map[parent_id]
     ])
 
     fig = px.pie(
@@ -313,11 +281,7 @@ def make_pie(parent_id):
         hole=0.35,
     )
     fig.update_traces(textposition="inside", textinfo="percent+label")
-    fig.update_layout(
-        margin=dict(l=10, r=10, t=55, b=10),
-        legend=dict(orientation="h", y=-0.15),
-        height=390,
-    )
+    fig.update_layout(margin=dict(l=10, r=10, t=55, b=10), legend=dict(orientation="h", y=-0.15), height=390)
     return fig
 
 
@@ -339,11 +303,11 @@ app.layout = html.Div(
                 html.Div([
                     html.H2("Eastleigh Energy Management Dashboard", style={"margin": "0"}),
                     html.Div(
-                        "Single-line balancing view + simple contribution view for non-technical users.",
+                        "Single-line balancing view + contribution chart. Data reads from Eastleigh_Masterlist.xlsx.",
                         style={"color": "#64748b", "fontSize": "13px"},
                     ),
                 ]),
-                html.Div("Excel-driven EMS Demo", style={
+                html.Div("V3 Updated File", style={
                     "fontWeight": "bold",
                     "color": "#2563eb",
                     "border": "1px solid #cbd5e1",
@@ -352,29 +316,15 @@ app.layout = html.Div(
                 }),
             ],
         ),
-
         html.Div(
-            style={
-                "display": "grid",
-                "gridTemplateColumns": "1fr 460px",
-                "gap": "12px",
-                "padding": "12px",
-            },
+            style={"display": "grid", "gridTemplateColumns": "1fr 460px", "gap": "12px", "padding": "12px"},
             children=[
                 html.Div(
-                    style={
-                        "backgroundColor": "white",
-                        "borderRadius": "14px",
-                        "boxShadow": "0 3px 14px rgba(0,0,0,0.08)",
-                        "overflow": "hidden",
-                    },
+                    style={"backgroundColor": "white", "borderRadius": "14px", "boxShadow": "0 3px 14px rgba(0,0,0,0.08)", "overflow": "hidden"},
                     children=[
                         html.Div(
                             style={"padding": "10px 14px", "fontSize": "13px", "color": "#475569"},
-                            children=[
-                                html.B("Colour rule: "),
-                                "Green = balanced within ±5%, Amber = check ±5–10%, Red = mismatch above ±10%.",
-                            ],
+                            children=[html.B("Colour rule: "), "Green = balanced within ±5%, Amber = check ±5–10%, Red = mismatch above ±10%."],
                         ),
                         cyto.Cytoscape(
                             id="eastleigh-network",
@@ -385,142 +335,48 @@ app.layout = html.Div(
                             boxSelectionEnabled=True,
                             style={"width": "100%", "height": "72vh"},
                             stylesheet=[
-                                {
-                                    "selector": "node",
-                                    "style": {
-                                        "label": "data(label)",
-                                        "text-wrap": "wrap",
-                                        "text-max-width": "132px",
-                                        "font-size": "10px",
-                                        "font-weight": "bold",
-                                        "text-valign": "center",
-                                        "text-halign": "center",
-                                        "background-color": "#ffffff",
-                                        "border-width": 2,
-                                        "border-color": "#f59e0b",
-                                        "width": "150px",
-                                        "height": "92px",
-                                        "shape": "round-rectangle",
-                                        "color": "#111827",
-                                    },
-                                },
-                                {
-                                    "selector": ".virtual",
-                                    "style": {
-                                        "border-width": 3,
-                                        "border-color": "#7c3aed",
-                                        "background-color": "#f5f3ff",
-                                    },
-                                },
-                                {
-                                    "selector": ".parent",
-                                    "style": {
-                                        "border-width": 3,
-                                        "border-color": "#2563eb",
-                                        "background-color": "#eff6ff",
-                                    },
-                                },
-                                {
-                                    "selector": ".subparent",
-                                    "style": {
-                                        "border-width": 3,
-                                        "border-color": "#16a34a",
-                                        "background-color": "#f0fdf4",
-                                    },
-                                },
-                                {
-                                    "selector": ".balanced",
-                                    "style": {
-                                        "background-color": "#dcfce7",
-                                        "border-color": "#16a34a",
-                                    },
-                                },
-                                {
-                                    "selector": ".check",
-                                    "style": {
-                                        "background-color": "#fef3c7",
-                                        "border-color": "#f59e0b",
-                                        "border-width": 4,
-                                    },
-                                },
-                                {
-                                    "selector": ".mismatch",
-                                    "style": {
-                                        "background-color": "#fee2e2",
-                                        "border-color": "#dc2626",
-                                        "border-width": 4,
-                                    },
-                                },
-                                {
-                                    "selector": "edge",
-                                    "style": {
-                                        "width": 2,
-                                        "line-color": "#334155",
-                                        "target-arrow-color": "#334155",
-                                        "target-arrow-shape": "triangle",
-                                        "curve-style": "taxi",
-                                        "taxi-direction": "downward",
-                                        "taxi-turn": "50%",
-                                    },
-                                },
+                                {"selector": "node", "style": {
+                                    "label": "data(label)", "text-wrap": "wrap", "text-max-width": "132px",
+                                    "font-size": "10px", "font-weight": "bold", "text-valign": "center", "text-halign": "center",
+                                    "background-color": "#ffffff", "border-width": 2, "border-color": "#f59e0b",
+                                    "width": "150px", "height": "92px", "shape": "round-rectangle", "color": "#111827",
+                                }},
+                                {"selector": ".virtual", "style": {"border-width": 3, "border-color": "#7c3aed", "background-color": "#f5f3ff"}},
+                                {"selector": ".parent", "style": {"border-width": 3, "border-color": "#2563eb", "background-color": "#eff6ff"}},
+                                {"selector": ".subparent", "style": {"border-width": 3, "border-color": "#16a34a", "background-color": "#f0fdf4"}},
+                                {"selector": ".balanced", "style": {"background-color": "#dcfce7", "border-color": "#16a34a"}},
+                                {"selector": ".check", "style": {"background-color": "#fef3c7", "border-color": "#f59e0b", "border-width": 4}},
+                                {"selector": ".mismatch", "style": {"background-color": "#fee2e2", "border-color": "#dc2626", "border-width": 4}},
+                                {"selector": "edge", "style": {
+                                    "width": 2, "line-color": "#334155", "target-arrow-color": "#334155",
+                                    "target-arrow-shape": "triangle", "curve-style": "taxi", "taxi-direction": "downward", "taxi-turn": "50%",
+                                }},
                             ],
                         ),
                     ],
                 ),
-
                 html.Div(
-                    style={
-                        "display": "grid",
-                        "gridTemplateRows": "auto 1fr",
-                        "gap": "12px",
-                    },
+                    style={"display": "grid", "gridTemplateRows": "auto 1fr", "gap": "12px"},
                     children=[
                         html.Div(
-                            style={
-                                "backgroundColor": "white",
-                                "borderRadius": "14px",
-                                "boxShadow": "0 3px 14px rgba(0,0,0,0.08)",
-                                "padding": "12px",
-                            },
+                            style={"backgroundColor": "white", "borderRadius": "14px", "boxShadow": "0 3px 14px rgba(0,0,0,0.08)", "padding": "12px"},
                             children=[
                                 html.H3("Contribution Chart", style={"marginTop": 0}),
                                 html.Div("Choose a parent meter:", style={"fontSize": "12px", "color": "#64748b"}),
-                                dcc.Dropdown(
-                                    id="parent-dropdown",
-                                    options=parent_options,
-                                    value=default_parent,
-                                    clearable=False,
-                                    style={"marginTop": "6px"},
-                                ),
+                                dcc.Dropdown(id="parent-dropdown", options=parent_options, value=default_parent, clearable=False, style={"marginTop": "6px"}),
                                 dcc.Graph(id="contribution-pie", figure=make_pie(default_parent)),
                             ],
                         ),
-
                         html.Div(
-                            style={
-                                "backgroundColor": "white",
-                                "borderRadius": "14px",
-                                "boxShadow": "0 3px 14px rgba(0,0,0,0.08)",
-                                "padding": "12px",
-                                "overflowY": "auto",
-                            },
+                            style={"backgroundColor": "white", "borderRadius": "14px", "boxShadow": "0 3px 14px rgba(0,0,0,0.08)", "padding": "12px", "overflowY": "auto"},
                             children=[
                                 html.H3("Balance Check", style={"marginTop": 0}),
                                 dash_table.DataTable(
                                     data=balance_rows,
                                     columns=[{"name": c, "id": c} for c in balance_rows[0].keys()] if balance_rows else [],
                                     style_table={"overflowX": "auto"},
-                                    style_cell={
-                                        "fontSize": "11px",
-                                        "padding": "6px",
-                                        "textAlign": "left",
-                                        "whiteSpace": "normal",
-                                        "height": "auto",
-                                    },
-                                    style_header={
-                                        "fontWeight": "bold",
-                                        "backgroundColor": "#f8fafc",
-                                    },
+                                    style_cell={"fontSize": "11px", "padding": "6px", "textAlign": "left", "whiteSpace": "normal", "height": "auto"},
+                                    style_header={"fontWeight": "bold", "backgroundColor": "#f8fafc"},
                                     style_data_conditional=[
                                         {"if": {"filter_query": "{Status} = 'MISMATCH'"}, "backgroundColor": "#fee2e2", "color": "#991b1b", "fontWeight": "bold"},
                                         {"if": {"filter_query": "{Status} = 'CHECK'"}, "backgroundColor": "#fef3c7", "color": "#92400e"},
@@ -538,10 +394,7 @@ app.layout = html.Div(
 )
 
 
-@app.callback(
-    Output("contribution-pie", "figure"),
-    Input("parent-dropdown", "value"),
-)
+@app.callback(Output("contribution-pie", "figure"), Input("parent-dropdown", "value"))
 def update_pie(parent_id):
     return make_pie(parent_id)
 
