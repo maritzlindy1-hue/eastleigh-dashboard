@@ -2,3 +2,4 @@ dash
 dash-cytoscape
 pandas
 openpyxl
+plotly
